@@ -100,12 +100,12 @@ class User
 try {
     $pdo = new PDO('sqlite:./db');
     $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
-    $pdo->exec('CREATE TABLE IF NOT EXISTS user (id int auto_increment PRIMARY KEY, storage text)');
+    $pdo->exec('CREATE TABLE IF NOT EXISTS user (id integer PRIMARY KEY, storage text)');
     User::setDb($pdo);
     $user = User::instance(68);
     $user->get('work\new1');
     $user->set('work\new', ['role' => 'new_work_role', 'address' => 'homeland']);
-    $user->get('work\new');
+    $user->get('work\new\role');
     $user->get('work\new\address');
 } catch (Exception $e) {
     echo $e->getMessage() . "\n";
