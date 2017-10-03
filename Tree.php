@@ -1,115 +1,123 @@
 <?php
 
-class User
+class Tree
 {
-    static private $_db = null;
-    private $_storage;
-    private $_id = null;
+    private $_db;
 
-    private function __construct()
+    public function __construct($db)
     {
+        $this->_db = $db;
     }
 
-    private function __clone()
+    public function getFiles($folderId)
     {
+        $stmt = $this->_db->prepare('SELECT * FROM tree WHERE `left` > (SELECT `left` FROM tree WHERE id = ?) AND `right` <  (SELECT `right` FROM tree WHERE id = ?) AND `type` = "file" ORDER BY `left`');
+        $stmt->execute([$folderId, $folderId]);
+        return $stmt->fetchAll(PDO::FETCH_ASSOC);
     }
 
-    private function __sleep()
+    public function getRoot()
     {
+        $stmt = $this->_db->prepare('SELECT * FROM tree WHERE `left` = 1');
+        $stmt->execute();
+        return $stmt->fetch(PDO::FETCH_ASSOC);
     }
 
-    private function __wakeup()
+    public function add($name, $type = 'folder', $parentId = 0)
     {
-    }
-
-    public static function instance($id)
-    {
-        if (!self::$_db) {
-            throw new Exception('db not set');
+        if ($parentId === 0) {
+            $stmt = $this->_db->prepare('INSERT INTO tree(`left`, `right`, `level`, `name`, `type`) VALUES(1, 2, 0, ?, ?)');
+            $stmt->execute([$name, 'folder']);
+            return false;
         }
-        static $instance = false;
-        if ($instance === false) {
-            $instance = new static();
+        $stmt = $this->_db->prepare('SELECT * FROM tree WHERE id = ?');
+        $stmt->execute([$parentId]);
+        $treeItem = $stmt->fetch(PDO::FETCH_ASSOC);
+
+        if ($treeItem['type'] === 'file') {
+            return false;
         }
-        $instance->_init($id);
-        return $instance;
+
+        $stmt = $this->_db->prepare('UPDATE tree SET `right` = `right` + 2, `left` = CASE WHEN `left` > ? then `left` + 2 else `left` end WHERE `right` >= ?');
+        $stmt->execute([
+                $treeItem['right'],
+                $treeItem['right'],
+            ]
+        );
+
+        $stmt = $this->_db->prepare('INSERT INTO tree(`left`, `right`, `level`, `name`, `type`) VALUES(?, ?, ?, ?, ?)');
+        $stmt->execute([
+                    $treeItem['right'],
+                    $treeItem['right'] + 1,
+                    $treeItem['level'] + 1,
+                    $name,
+                    $type
+                ]
+            );
+        return $this->_db->lastInsertId();
     }
 
-    private function _init($id)
+    public function delete($id)
     {
-        $this->_id = (int)$id;
-        $this->_storage = [];
-        $stmt = self::$_db->prepare('SELECT storage FROM user WHERE id = ?');
-        $stmt->execute([$this->_id]);
-        $storage = current((array)$stmt->fetch(PDO::FETCH_NUM));
-        if ($storage)
-            $this->_storage = self::unserialize($storage);
-    }
+        $stmt = $this->_db->prepare('SELECT * FROM tree WHERE id = ?');
+        $stmt->execute([$id]);
+        $treeItem = $stmt->fetch(PDO::FETCH_ASSOC);
 
-    static protected function serialize($value)
-    {
-        array_walk_recursive($value, function ($el) {
-            return is_string($el) ? $el : (array)$el;
-        });
-        return serialize($value);
-    }
+        if($treeItem) {
+            $stmt = $this->_db->prepare('DELETE FROM tree WHERE `left` >= ? AND `right` <= ?');
+            $stmt->execute([$treeItem['left'], $treeItem['right']]);
 
-    static protected function unserialize($value)
-    {
-        $value = (array)unserialize($value);
-        array_walk_recursive($value, function ($el) {
-            return is_string($el) ? $el : (array)$el;
-        });
-        return $value;
-    }
-
-    public function get($arg)
-    {
-        $chunks = explode('\\', $arg);
-        $el = $this->_storage;
-        foreach ($chunks as $chunk) {
-            if (!isset($el[$chunk]))
-                return null;
-            $el = $el[$chunk];
+            $stmt = $this->_db->prepare('UPDATE tree SET 
+              `left` = CASE WHEN `left` > :left THEN `left` - (:right - :left + 1) ELSE `left` END, 
+              `right` = `right` - (:right - :left + 1) 
+              WHERE `right` > :right');
+            $stmt->execute([
+                ':left' => $treeItem['left'],
+                ':right' => $treeItem['right'],
+            ]);
         }
-        return $el;
-    }
-
-    public function set($key, $value)
-    {
-        $chunks = explode('\\', $key);
-        $el = &$this->_storage;
-        foreach ($chunks as $chunk) {
-            if (!isset($el[$chunk]))
-                $el[$chunk] = [];
-            $el = &$el[$chunk];
-        }
-        $el = $value;
-
-        $stmt = self::$_db->prepare('INSERT OR REPLACE INTO user(id, storage) VALUES(?, ?)');
-        $stmt->execute([$this->_id, self::serialize($this->_storage)]);
-    }
-
-    static public function setDb($db)
-    {
-        self::$_db = $db;
     }
 }
 
 try {
     $pdo = new PDO('sqlite:./db');
     $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
-    $pdo->exec('CREATE TABLE IF NOT EXISTS user (id int auto_increment PRIMARY KEY, storage text)');
-    User::setDb($pdo);
-    $user = User::instance(68);
-    $user->get('work\new1');
-    $user->set('work\new', ['role' => 'new_work_role', 'address' => 'homeland']);
-    $user->get('work\new');
-    $user->get('work\new\address');
+    $pdo->exec('CREATE TABLE IF NOT EXISTS tree
+	(
+		id integer primary key AUTOINCREMENT,
+		name varchar(100) null,
+		`left` integer not null,
+		`right` integer not null,
+		level integer not null,
+		type varchar(100) null
+	);');
+    $pdo->exec('DELETE FROM `tree`');
+    $tree = new Tree($pdo);
+
+    $tree->add('root', 0);
+    $root = $tree->getRoot();
+
+    $fotosId = $tree->add('Fotos', 'folder', $root['id']);
+
+    $tree->add('FileCats', 'file', $fotosId);
+    $tree->add('FileCats1', 'file', $fotosId);
+    $tree->add('FileCats2', 'file', $fotosId);
+
+    $videosId = $tree->add('Videos', 'folder', $root['id']);
+
+    $tree->add('VideoDog', 'file', $videosId);
+    $tree->add('VideoDog2', 'file', $videosId);
+    $tree->add('VideoDog3', 'file', $videosId);
+
+    $tree->getFiles($videosId);
+
+    $tree->delete($videosId);
+
 } catch (Exception $e) {
     echo $e->getMessage() . "\n";
     echo 'file: ', $e->getFile() . "\n";
     echo 'line: ', $e->getLine() . "\n";
 }
+
 
 
