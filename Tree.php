@@ -26,9 +26,14 @@ class Tree
     public function add($name, $type = 'folder', $parentId = 0)
     {
         if ($parentId === 0) {
-            $stmt = $this->_db->prepare('INSERT INTO tree(`left`, `right`, `level`, `name`, `type`) VALUES(1, 2, 0, ?, ?)');
-            $stmt->execute([$name, 'folder']);
-            return false;
+            $stmt = $this->_db->prepare('SELECT * FROM tree WHERE left = ?');
+            $stmt->execute([1]);
+            $treeItem = $stmt->fetch(PDO::FETCH_ASSOC);
+            if(!$treeItem) {
+                $stmt = $this->_db->prepare('INSERT INTO tree(`left`, `right`, `level`, `name`, `type`) VALUES(1, 2, 0, ?, ?)');
+                $stmt->execute([$name, 'folder']);
+            }
+            return $treeItem? $treeItem['id'] : $this->_db->lastInsertId();
         }
         $stmt = $this->_db->prepare('SELECT * FROM tree WHERE id = ?');
         $stmt->execute([$parentId]);
@@ -91,7 +96,11 @@ try {
 		level integer not null,
 		type varchar(100) null
 	);');
+    $pdo->exec('CREATE INDEX tree_left_index ON tree ("left")');
+    $pdo->exec('CREATE INDEX tree_right_index ON tree ("right");');
+	$pdo->exec('CREATE INDEX tree_level_index ON tree (level)');
     $pdo->exec('DELETE FROM `tree`');
+
     $tree = new Tree($pdo);
 
     $tree->add('root', 0);
