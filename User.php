@@ -41,7 +41,8 @@ class User
         $this->_storage = [];
         $stmt = self::$_db->prepare('SELECT storage FROM user WHERE id = ?');
         $stmt->execute([$this->_id]);
-        $storage = current((array)$stmt->fetch(PDO::FETCH_NUM));
+        $storage = (array) $stmt->fetch(PDO::FETCH_NUM);
+        $storage = current($storage);
         if ($storage)
             $this->_storage = self::unserialize($storage);
     }
